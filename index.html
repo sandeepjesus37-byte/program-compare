@@ -1,0 +1,613 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>CNC Program Compare</title>
+<style>
+:root{--bg:#f4f6f8;--card:#fff;--ink:#1d2a33;--mut:#5d6b76;--line:#d5dce2;--acc:#0f6e7a;--ok:#1b7a3d;--warn:#b87400;--bad:#b3261e;--blue:#2563c9}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 system-ui,Segoe UI,Arial,sans-serif}
+.wrap{max-width:1250px;margin:0 auto;padding:20px 16px 60px}
+h1{font-size:22px;margin:0 0 2px}h2{font-size:16px;margin:0 0 8px}
+.sub{color:var(--mut);margin:0 0 14px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:12px}
+button{font:inherit;border:0;border-radius:8px;padding:9px 16px;background:var(--acc);color:#fff;cursor:pointer;font-weight:600}
+button:disabled{background:#9aa7b0;cursor:not-allowed}
+button.alt{background:#fff;color:var(--acc);border:1px solid var(--acc)}
+button.sm{padding:4px 10px;font-size:12px}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}@media(max-width:800px){.grid2{grid-template-columns:1fr}}
+.pill{display:inline-block;background:#eef3f5;border-radius:999px;padding:2px 10px;font-weight:600;font-size:12.5px;margin:2px 4px 2px 0}
+.small{font-size:12.5px;color:var(--mut)}
+label.o{display:block;margin:3px 0;cursor:pointer}
+input[type=text],select{font:inherit;padding:5px 8px;border:1px solid var(--line);border-radius:6px}
+table{border-collapse:collapse;width:100%;font-size:13px}
+th,td{border:1px solid var(--line);padding:4px 7px;text-align:left;vertical-align:top}
+th{background:#eaf2f4;position:sticky;top:0;z-index:1}
+.tw{max-height:520px;overflow:auto;border:1px solid var(--line);border-radius:8px}
+.s-Same{background:#e3f4e8;color:#1b7a3d}.s-Changed{background:#fdf0d6;color:#8a5a00;font-weight:600}.s-Missing{background:#fde6e4;color:#b3261e;font-weight:600}.s-Extra{background:#e3ecfb;color:#2563c9;font-weight:600}.s-None{color:#9aa7b0}
+td.cell{cursor:pointer;text-align:center;white-space:nowrap}
+.tabs{display:flex;gap:6px;margin-bottom:8px}.tab{padding:6px 14px;border-radius:8px;border:1px solid var(--line);background:#fff;cursor:pointer;font-weight:600}.tab.on{background:var(--acc);color:#fff;border-color:var(--acc)}
+.mono{font:12px/1.4 ui-monospace,Consolas,monospace;white-space:pre-wrap;word-break:break-all}
+.dg{background:#fde6e4}.dm{background:#e3f4e8}
+#detail{margin-top:10px}
+progress{width:100%;height:10px}
+.err{color:var(--bad);font-weight:600}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>CNC Program Compare</h1>
+<p class="sub">Compare your golden stage programs with the programs on each machine. Finds missing, extra and changed programs and the exact lines that differ. Nothing is uploaded: everything runs in this page.</p>
+
+<div class="grid2">
+ <div class="card">
+  <h2>1. Golden reference (one stage, all programs)</h2>
+  <div class="row"><button id="pickG" type="button">Choose golden folder…</button><span id="gInfo" class="small">Not chosen</span></div>
+  <div class="small" style="margin-top:6px">Main, sub, probe and system programs. Sub-folders inside it (for example main / sub / probe / system) are used as the <b>Group</b>.</div>
+ </div>
+ <div class="card">
+  <h2>2. Stage folder(s) with the machines</h2>
+  <div class="row"><button id="pickT" type="button">Add stage folder…</button><button id="clrT" type="button" class="alt sm">Clear</button></div>
+  <div id="tInfo" class="small" style="margin-top:6px">Nothing added</div>
+  <label class="o" style="margin-top:6px"><input type="checkbox" id="single"> The folder I pick is ONE machine (no machine sub-folders)</label>
+  <div class="small">Normally each sub-folder inside the stage folder is one machine (any number). You can add several stage folders (cell to cell, stage to stage).</div>
+ </div>
+</div>
+
+<div class="card">
+ <h2>3. What counts as a difference</h2>
+ <div class="grid2">
+  <div>
+   <label class="o"><input type="checkbox" id="oBlank" checked> Ignore blank lines</label>
+   <label class="o"><input type="checkbox" id="oTrim" checked> Ignore spaces / tabs at the start and end of a line</label>
+   <label class="o"><input type="checkbox" id="oAllSp"> Ignore all spaces (G01 X10. = G01X10.)</label>
+   <label class="o"><input type="checkbox" id="oCase"> Ignore upper / lower case</label>
+  </div>
+  <div>
+   <label class="o"><input type="checkbox" id="oN"> Ignore line numbers (N10, N20 …)</label>
+   <label class="o"><input type="checkbox" id="oCom"> Ignore comments in brackets ( … )</label>
+   <label class="o"><input type="checkbox" id="oPct" checked> Ignore % lines</label>
+   <div class="row" style="margin-top:4px"><span class="small">Only these extensions (empty = all program files):</span><input type="text" id="oExt" style="width:200px" placeholder="e.g. nc, txt, mpf"></div>
+  </div>
+ </div>
+ <h2 style="margin-top:14px">Program checks (main program, operations, feed &amp; speed, cycle time, probing)</h2>
+ <div class="row">
+  <span class="small">Probe macro numbers start with:</span><input type="text" id="oProbe" value="98, 99" style="width:90px">
+  <span class="small">Rapid speed mm/min:</span><input type="text" id="oRapid" value="30000" style="width:80px">
+  <span class="small">Tool change seconds:</span><input type="text" id="oTc" value="2" style="width:50px">
+  <span class="small">Cycle time: flag if different by %:</span><input type="text" id="oTol" value="1" style="width:50px">
+ </div>
+ <div class="small" style="margin-top:4px">Cycle time is an estimate from the tool paths (cutting length / feed, rapids, tool changes, dwell). Use it to compare machines with the golden, not as the real machine time.</div>
+ <div class="row" style="margin-top:10px"><button id="go" type="button" disabled>Compare</button><progress id="bar" hidden></progress></div>
+ <div id="msg" class="small" style="margin-top:6px"></div>
+</div>
+
+<div id="res" hidden>
+ <div class="card">
+  <div class="row" style="justify-content:space-between"><h2 style="margin:0">Result</h2>
+   <div class="row"><button id="dlX" type="button">Download Excel</button><button id="dlP" type="button">Download PDF</button></div></div>
+  <div id="sum" style="margin-top:8px"></div>
+ </div>
+ <div class="card">
+  <div class="tabs"><div class="tab on" data-t="list">Change list</div><div class="tab" data-t="mat">Matrix (program × machine)</div></div>
+  <div class="row" style="margin-bottom:8px">
+   <span class="small">Show:</span>
+   <label class="o"><input type="checkbox" class="fs" value="Changed" checked> Changed</label>
+   <label class="o"><input type="checkbox" class="fs" value="Missing" checked> Missing on machine</label>
+   <label class="o"><input type="checkbox" class="fs" value="Extra" checked> Extra on machine</label>
+   <label class="o"><input type="checkbox" class="fs" value="Same"> Same</label>
+   <select id="fm"><option value="">All machines</option></select>
+   <select id="fg"><option value="">All groups</option></select>
+   <select id="ff"><option value="">All flags</option><option>Sequence</option><option>Tool</option><option>Feed / speed</option><option>Probing</option><option>Cycle time</option><option>Program no.</option></select>
+   <input type="text" id="fq" placeholder="Search program…" style="width:160px">
+  </div>
+  <div class="tw" id="view"></div>
+  <div id="detail"></div>
+ </div>
+</div>
+</div>
+
+<script>
+(function(){
+'use strict';
+var $=function(i){return document.getElementById(i)};
+var BIN=/\.(jpe?g|png|gif|bmp|pdf|xlsx?|xlsm|docx?|pptx?|zip|rar|7z|exe|dll|db|ini|lnk|mp4|avi)$/i;
+var G=null,T=[],R=null,tab='list';
+function esc(s){return String(s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
+function pick(cb){var i=document.createElement('input');i.type='file';i.webkitdirectory=true;i.multiple=true;i.onchange=function(){if(i.files&&i.files.length)cb(Array.prototype.slice.call(i.files))};i.click()}
+function exts(){return $('oExt').value.split(/[\s,;]+/).map(function(x){return x.replace(/^\./,'').toLowerCase()}).filter(Boolean)}
+function extOf(n){var i=n.lastIndexOf('.');return i>0?n.slice(i+1).toLowerCase():''}
+function keyOf(n){var i=n.lastIndexOf('.');return (i>0?n.slice(0,i):n).toLowerCase()}
+function okFile(f){var n=f.name;if(/^(thumbs\.db|\.ds_store|desktop\.ini)$/i.test(n)||n[0]==='~')return false;if(BIN.test(n))return false;var e=exts();return !e.length||e.indexOf(extOf(n))>=0||(!extOf(n)&&false)}
+function segs(f){return (f.webkitRelativePath||f.name).split('/')}
+function dstr(t){var d=new Date(t),p=function(n){return(n<10?'0':'')+n};return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate())+' '+p(d.getHours())+':'+p(d.getMinutes())}
+
+/* ---------- folder reading ---------- */
+function loadGolden(files){
+  var root=segs(files[0])[0],list=[],dup=0,seen={};
+  files.forEach(function(f){if(!okFile(f))return;var s=segs(f),k=keyOf(f.name),g=s.length>2?s[1]:'';
+    var rel=s.slice(1).join('/');if(seen[k]){dup++;seen[k].dups.push(rel);return}
+    var o={key:k,name:f.name,rel:rel,group:g,file:f,dups:[]};seen[k]=o;list.push(o)});
+  list.sort(function(a,b){return a.group===b.group?(a.name<b.name?-1:1):(a.group<b.group?-1:1)});
+  G={root:root,list:list,map:seen,dup:dup};
+  $('gInfo').innerHTML='<b>'+esc(root)+'</b> · '+list.length+' programs'+(dup?' · <span style="color:#b87400">'+dup+' duplicate names ignored</span>':'');
+  upd();
+}
+function addTarget(files){
+  var single=$('single').checked,root=segs(files[0])[0],ms={};
+  files.forEach(function(f){if(!okFile(f))return;var s=segs(f),m;
+    if(single)m=root;else if(s.length<=2)m='(files in '+root+')';else m=s[1];
+    var rel=single?s.slice(1).join('/'):(s.length<=2?s[1]:s.slice(2).join('/'));
+    (ms[m]=ms[m]||[]).push({key:keyOf(f.name),name:f.name,rel:rel,file:f})});
+  var names=Object.keys(ms).sort(function(a,b){return a.localeCompare(b,undefined,{numeric:true})});
+  if(!names.length){$('msg').innerHTML='<span class="err">No program files found in that folder.</span>';return}
+  T.push({label:root,machines:names.map(function(n){return{name:n,files:ms[n]}})});
+  showT();upd();
+}
+function showT(){
+  $('tInfo').innerHTML=T.length?T.map(function(t,i){return '<span class="pill">'+esc(t.label)+' · '+t.machines.length+' machine'+(t.machines.length>1?'s':'')+' <a href="#" data-rm="'+i+'" style="color:#b3261e;text-decoration:none">✕</a></span>'}).join(''):'Nothing added';
+}
+function upd(){$('go').disabled=!(G&&G.list.length&&T.length)}
+$('pickG').onclick=function(){pick(loadGolden)};
+$('pickT').onclick=function(){pick(addTarget)};
+$('clrT').onclick=function(){T=[];showT();upd()};
+$('tInfo').onclick=function(e){var a=e.target.closest('[data-rm]');if(a){e.preventDefault();T.splice(+a.dataset.rm,1);showT();upd()}};
+
+/* ---------- normalising ---------- */
+function opts(){return{blank:$('oBlank').checked,trim:$('oTrim').checked,allsp:$('oAllSp').checked,cs:$('oCase').checked,n:$('oN').checked,com:$('oCom').checked,pct:$('oPct').checked}}
+function norm(text,o){
+  var raw=text.split(/\r\n|\r|\n/),out=[];
+  for(var i=0;i<raw.length;i++){
+    var t=raw[i];
+    if(o.pct&&/^\s*%\s*$/.test(t))continue;
+    if(o.com)t=t.replace(/\([^)]*\)/g,'');
+    if(o.n)t=t.replace(/^\s*N\d+\s*/i,'');
+    if(o.allsp)t=t.replace(/\s+/g,'');else if(o.trim)t=t.replace(/^\s+|\s+$/g,'');
+    if(o.cs)t=t.toUpperCase();
+    if(o.blank&&t.replace(/\s/g,'')==='')continue;
+    out.push({t:t,n:i+1,o:raw[i]});
+  }
+  return out;
+}
+
+/* ---------- Myers diff ---------- */
+function myers(a,b,maxD){
+  var N=a.length,M=b.length,max=Math.min(N+M,maxD),off=max+1,V=new Int32Array(2*max+3),trace=[];
+  for(var d=0;d<=max;d++){
+    trace.push(V.slice(off-d,off+d+1));
+    for(var k=-d;k<=d;k+=2){
+      var x;
+      if(k===-d||(k!==d&&V[off+k-1]<V[off+k+1]))x=V[off+k+1];else x=V[off+k-1]+1;
+      var y=x-k;
+      while(x<N&&y<M&&a[x]===b[y]){x++;y++}
+      V[off+k]=x;
+      if(x>=N&&y>=M)return back(trace,N,M,d);
+    }
+  }
+  return null;
+}
+function back(trace,N,M,D){
+  var x=N,y=M,ops=[];
+  for(var d=D;d>0;d--){
+    var v=trace[d],k=x-y,pk;
+    /* trace[d] holds V before round d, i.e. after round d-1, for k from -d to d */
+    var vk=function(kk){return v[kk+d]};
+    if(k===-d||(k!==d&&vk(k-1)<vk(k+1)))pk=k+1;else pk=k-1;
+    var px=vk(pk),py=px-pk;
+    while(x>px&&y>py){x--;y--;ops.push(0)}
+    if(x===px){y--;ops.push(2)}else{x--;ops.push(1)}   /* 1 = only in golden, 2 = only in machine */
+    x=px;y=py;
+  }
+  while(x>0&&y>0){x--;y--;ops.push(0)}
+  return ops.reverse();
+}
+function diffLines(ga,ma){
+  /* returns {hunks, nG, nM, tooBig} ; hunks:[{g:[{n,o}],m:[{n,o}]}] */
+  var ids={},nid=0,ia=ga.map(function(l){var k=l.t;if(ids[k]===undefined)ids[k]=nid++;return ids[k]}),ib=ma.map(function(l){var k=l.t;if(ids[k]===undefined)ids[k]=nid++;return ids[k]});
+  var s=0;while(s<ia.length&&s<ib.length&&ia[s]===ib[s])s++;
+  var ea=ia.length,eb=ib.length;while(ea>s&&eb>s&&ia[ea-1]===ib[eb-1]){ea--;eb--}
+  var a=ia.slice(s,ea),b=ib.slice(s,eb),hunks=[];
+  if(!a.length&&!b.length)return{hunks:[],nG:0,nM:0};
+  var ops=myers(a,b,2500);
+  if(!ops){return{hunks:[{g:ga.slice(s,ea),m:ma.slice(s,eb)}],nG:ea-s,nM:eb-s,tooBig:true}}
+  var x=0,y=0,cur=null,nG=0,nM=0;
+  ops.forEach(function(op){
+    if(op===0){cur=null;x++;y++;return}
+    if(!cur){cur={g:[],m:[]};hunks.push(cur)}
+    if(op===1){cur.g.push(ga[s+x]);x++;nG++}else{cur.m.push(ma[s+y]);y++;nM++}
+  });
+  return{hunks:hunks,nG:nG,nM:nM};
+}
+
+/* ---------- program analysis (reads the program like a setter would) ---------- */
+function cfg(){return{probe:$('oProbe').value.split(/[\s,;]+/).filter(Boolean),rapid:+$('oRapid').value||30000,tc:+$('oTc').value||0,tol:+$('oTol').value||1}}
+function stripC(s){return s.replace(/\([^)]*\)/g,'')}
+function evalExp(s){var e=s.replace(/#\d+/g,'0').replace(/\[/g,'(').replace(/\]/g,')');if(!/^[0-9.+\-*\/()\s]+$/.test(e))return 0;try{var v=Function('"use strict";return ('+e+')')();return isFinite(v)?v:0}catch(x){return 0}}
+function words(s){
+  var out=[],i=0,n=s.length;
+  while(i<n){var c=s[i];
+    if(/[A-Za-z]/.test(c)){var L=c.toUpperCase(),j=i+1;
+      if(s[j]==='['){var d=0,k=j;for(;k<n;k++){if(s[k]==='[')d++;else if(s[k]===']'){d--;if(!d)break}}out.push([L,evalExp(s.slice(j,k+1))]);i=k+1;continue}
+      if(s[j]==='#'){var m=/^#\d+/.exec(s.slice(j));out.push([L,0]);i=j+(m?m[0].length:1);continue}
+      var m2=/^[-+]?(\d+\.?\d*|\.\d+)/.exec(s.slice(j));
+      if(m2){out.push([L,parseFloat(m2[0])]);i=j+m2[0].length;continue}
+    }
+    i++;}
+  return out}
+function pad4(d){d=String(d);while(d.length<4)d='0'+d;return d}
+function fnum(v){return String(Math.round(v*10000)/10000)}
+function estTime(lines,c){
+  var x=0,y=0,z=0,mode=0,F=0,abs=true,t=0,plane=17;
+  for(var li=0;li<lines.length;li++){
+    var s=stripC(lines[li].o).replace(/^\s*N\d+/i,'').replace(/\s+/g,'').toUpperCase();
+    if(!s||s[0]==='#'||/^(IF|WHILE|GOTO|DO\d|END\d|THEN|%|O\d)/.test(s))continue;
+    var w=words(s),g={},has=false,nx=x,ny=y,nz=z,I=null,J=null,K=null,hasM6=false,gl=[];
+    for(var k=0;k<w.length;k++){var L=w[k][0],v=w[k][1];
+      if(L==='G')gl.push(v);
+      else if(L==='F')F=v;
+      else if(L==='X'){nx=abs?v:x+v;has=true}else if(L==='Y'){ny=abs?v:y+v;has=true}else if(L==='Z'){nz=abs?v:z+v;has=true}
+      else if(L==='I')I=v;else if(L==='J')J=v;else if(L==='K')K=v;
+      else if(L==='M'&&v===6)hasM6=true}
+    if(hasM6)t+=c.tc;
+    var skip=false;
+    gl.forEach(function(v){if(v===0||v===1||v===2||v===3)mode=v;else if(v===90)abs=true;else if(v===91)abs=false;else if(v===17||v===18||v===19)plane=v;else if(v===28||v===30||v===53||v===65||v===31||v===4)skip=skip||(v!==4)});
+    var dw=/G0?4(?:P(\d+\.?\d*)|X(\d+\.?\d*))/.exec(s);if(dw){t+=dw[2]?parseFloat(dw[2]):(dw[1].indexOf('.')>=0?parseFloat(dw[1]):parseFloat(dw[1])/1000)}
+    if(skip){if(/G28|G30/.test(s)){abs=true;/* machine home moves: ignore, position unknown */}continue}
+    if(!has)continue;
+    var dx=nx-x,dy=ny-y,dz=nz-z,len=0;
+    if(mode===2||mode===3){
+      var a1=plane===18?I:I,b1=plane===18?K:J,aa=plane===18?[x,z,nx,nz]:plane===19?[y,z,ny,nz]:[x,y,nx,ny];
+      var ci=plane===19?J:I,cj=plane===18?K:(plane===19?K:J);
+      if(ci!==null&&cj!==null){var r=Math.hypot(ci,cj),a0=Math.atan2(-cj,-ci),a2=Math.atan2(aa[3]-(aa[1]+cj),aa[2]-(aa[0]+ci)),da=a2-a0;
+        if(mode===3){while(da<=1e-9)da+=2*Math.PI}else{while(da>=-1e-9)da-=2*Math.PI}
+        if(Math.hypot(aa[2]-aa[0],aa[3]-aa[1])<1e-6)da=mode===3?2*Math.PI:-2*Math.PI;
+        var al=Math.abs(da)*r,oz=plane===17?dz:(plane===18?dy:dx);len=Math.hypot(al,oz)}
+      else len=Math.hypot(dx,dy,dz)}
+    else len=Math.hypot(dx,dy,dz);
+    if(mode===0)t+=len/c.rapid*60;else if(F>0)t+=len/F*60;
+    x=nx;y=ny;z=nz;
+  }
+  return t}
+function analyze(lines,c){
+  var A={name:'',calls:[],ops:[],probe:[],end:'',time:0,motion:0,nProbeMacro:0},cur={key:'(start)',tool:'',S:[],F:[]},seen={},hasLabel=false,tcCount=0;
+  A.ops.push(cur);
+  function addU(a,v){var s=fnum(v);if(a.indexOf(s)<0)a.push(s)}
+  lines.forEach(function(l,idx){
+    var raw=l.o;
+    if(!A.name&&idx<6){var m0=/^\s*O(\d{1,5})/i.exec(raw);if(m0)A.name='O'+pad4(m0[1])}
+    var lab=/^\s*N\d+\s*\(([^)]*?)\s*TOOL\s*O?\s*([^)]*)\)/i.exec(raw);
+    if(lab){hasLabel=true;var key=lab[1].trim()||'operation';if(seen[key]){seen[key]++;key+=' #'+seen[key]}else seen[key]=1;cur={key:key,tool:lab[2].trim(),S:[],F:[]};A.ops.push(cur)}
+    var pm=/\(\s*(PROBE[^)]*)\)/i.exec(raw);if(pm&&!/TOOL/i.test(raw))A.probe.push(pm[1].replace(/\s+/g,' ').trim().toUpperCase());
+    var s=stripC(raw).replace(/^\s*N\d+/i,'').replace(/\s+/g,'').toUpperCase();
+    if(!s)return;
+    var cm=/M0?98P(\d+)/.exec(s);if(cm)A.calls.push('O'+pad4(cm[1]));
+    var cm2=/M198P(\d+)/.exec(s);if(cm2)A.calls.push('O'+pad4(cm2[1]));
+    var g65=/G65P(\d+)/.exec(s);
+    if(g65){var isP=c.probe.some(function(p){return g65[1].indexOf(p)===0});if(isP){A.probe.push(s);A.nProbeMacro++}}
+    if(/G31(?!\d)/.test(s)){A.probe.push(s)}
+    if(!g65&&!/G31(?!\d)/.test(s)){
+      var w=words(s);
+      w.forEach(function(p){if(p[0]==='S'&&p[1]>0)addU(cur.S,p[1]);else if(p[0]==='F'&&p[1]>0)addU(cur.F,p[1]);
+        else if(p[0]==='T'&&/M0?6/.test(s)&&!hasLabel){}});
+      if(/M0?6(?!\d)/.test(s)){var tm=/T(\d+)/.exec(s);var tn=tm?'T'+tm[1]:'';
+        if(hasLabel){if(!cur.toolNo)cur.toolNo=tn}
+        else{tcCount++;var k2='Tool change '+(tn||'#'+tcCount);if(seen[k2]){seen[k2]++;k2+=' #'+seen[k2]}else seen[k2]=1;cur={key:k2,tool:tn,S:[],F:[]};A.ops.push(cur)}}
+      if(/G0?[0123](?!\d)/.test(s))A.motion++;
+    }
+    if(/M30(?!\d)/.test(s))A.end='M30';else if(/M99(?!\d)/.test(s)&&A.end!=='M30')A.end='M99';
+  });
+  var num=parseInt((A.name||'O0').slice(1),10);
+  A.role=(num>=9000&&num<=9999)?'Probe / system macro':A.calls.length?'Main':(A.nProbeMacro>0&&A.motion<20)?'Probing program':A.motion===0?'Utility':A.end==='M30'?'Main':'Operation';
+  A.time=estTime(lines,c);
+  return A}
+function seqCompare(a,b){
+  /* a, b: arrays of strings. returns list of text lines: missing / extra / order changed */
+  var d=diffLines(a.map(function(t,i){return{t:t,n:i+1,o:t}}),b.map(function(t,i){return{t:t,n:i+1,o:t}})),rem=[],add=[];
+  d.hunks.forEach(function(h){h.g.forEach(function(x){rem.push(x)});h.m.forEach(function(x){add.push(x)})});
+  var out=[],used={};
+  rem.forEach(function(r){var j=add.findIndex(function(q,ix){return !used[ix]&&q.t===r.t});if(j>=0){used[j]=1;out.push('Order changed: '+r.t+' (golden step '+r.n+', machine step '+add[j].n+')')}else out.push('Missing on machine: '+r.t+' (golden step '+r.n+')')});
+  add.forEach(function(q,ix){if(!used[ix])out.push('Extra on machine: '+q.t+' (machine step '+q.n+')')});
+  return out}
+var SEV=['Missing on machine','Main program sequence','Operation sequence','Tool','Probing','Feed / speed','Cycle time','Program no.','Changed lines','Extra file'];
+function findings(g,m,c,row){
+  var f=[];
+  if(g.name&&m.name&&g.name!==m.name)f.push({cat:'Program no.',g:g.name,m:m.name,d:'Program number written inside the file is different'});
+  if(g.calls.join()!==m.calls.join())f.push({cat:'Main program sequence',g:g.calls.join(' > ')||'(no calls)',m:m.calls.join(' > ')||'(no calls)',d:seqCompare(g.calls,m.calls).join('; ')});
+  var gk=g.ops.filter(function(o){return o.key!=='(start)'}).map(function(o){return o.key}),mk=m.ops.filter(function(o){return o.key!=='(start)'}).map(function(o){return o.key});
+  if(gk.join('\u0001')!==mk.join('\u0001')){seqCompare(gk,mk).forEach(function(t){f.push({cat:'Operation sequence',g:'',m:'',d:t})})}
+  var mm={};m.ops.forEach(function(o){mm[o.key]=o});
+  g.ops.forEach(function(o){var q=mm[o.key];if(!q)return;
+    var gt=(o.tool+' '+(o.toolNo||'')).trim(),mt=(q.tool+' '+(q.toolNo||'')).trim();if(gt!==mt)f.push({cat:'Tool',g:gt,m:mt,d:'Tool in '+o.key});
+    if(o.S.join()!==q.S.join())f.push({cat:'Feed / speed',g:'S '+(o.S.join(', ')||'-'),m:'S '+(q.S.join(', ')||'-'),d:'Spindle speed in '+o.key});
+    if(o.F.join()!==q.F.join())f.push({cat:'Feed / speed',g:'F '+(o.F.join(', ')||'-'),m:'F '+(q.F.join(', ')||'-'),d:'Feed in '+o.key})});
+  if(g.probe.join('\u0001')!==m.probe.join('\u0001')){
+    var d=diffLines(g.probe.map(function(t,i){return{t:t,n:i+1,o:t}}),m.probe.map(function(t,i){return{t:t,n:i+1,o:t}}));
+    d.hunks.slice(0,60).forEach(function(h){f.push({cat:'Probing',g:h.g.map(function(x){return x.n+': '+x.o}).join(' | '),m:h.m.map(function(x){return x.n+': '+x.o}).join(' | '),d:(h.g.length&&!h.m.length)?'Probe step missing on machine':(!h.g.length&&h.m.length)?'Extra probe step on machine':'Probe step different'})});
+  }
+  if(g.time>0){var pct=(m.time-g.time)/g.time*100;row.tG=g.time;row.tM=m.time;row.tPct=pct;
+    if(Math.abs(pct)>=c.tol)f.push({cat:'Cycle time',g:(g.time/60).toFixed(2)+' min',m:(m.time/60).toFixed(2)+' min',d:'Estimated from tool paths: '+(pct>0?'+':'')+pct.toFixed(1)+'% (machine vs golden)'})}
+  return f}
+function fsRows(g,m){
+  var mm={},out=[];m.ops.forEach(function(o){mm[o.key]=o});
+  g.ops.forEach(function(o){if(o.key==='(start)'&&!o.S.length&&!o.F.length)return;var q=mm[o.key];
+    var gt=(o.tool+' '+(o.toolNo||'')).trim();
+    if(!q){out.push([o.key,gt,o.S.join(', '),'',o.F.join(', '),'','Operation missing on machine','']);return}
+    var mt=(q.tool+' '+(q.toolNo||'')).trim(),ds=o.S.join()!==q.S.join(),df=o.F.join()!==q.F.join(),dt=gt!==mt,w=[];
+    if(dt)w.push('Tool');if(ds)w.push('Speed');if(df)w.push('Feed');
+    out.push([o.key,gt,o.S.join(', '),q.S.join(', '),o.F.join(', '),q.F.join(', '),w.length?w.join(' + ')+' differ'+(w.length>1?'':'s'):'Same',mt])});
+  return out}
+function flagsOf(f){var s={};f.forEach(function(x){s[x.cat==='Main program sequence'||x.cat==='Operation sequence'?'Sequence':x.cat]=1});return Object.keys(s)}
+
+/* ---------- compare ---------- */
+function tick(){return new Promise(function(r){setTimeout(r,0)})}
+async function compare(){
+  var o=opts(),c0=cfg(),rows=[],machines=[],gcache={},acache={},total=0,done=0;
+  T.forEach(function(t){t.machines.forEach(function(m){total+=G.list.length;machines.push({target:t.label,name:m.name,files:m.files})})});
+  $('bar').hidden=false;$('bar').max=total;$('bar').value=0;$('go').disabled=true;
+  async function gl(g){if(!gcache[g.key]){gcache[g.key]=norm(await g.file.text(),o);acache[g.key]=analyze(gcache[g.key],c0)}return gcache[g.key]}
+  for(var mi=0;mi<machines.length;mi++){
+    var M=machines[mi],mk={},extra=[];
+    M.files.forEach(function(f){if(mk[f.key])f.dupOf=mk[f.key];else mk[f.key]=f});
+    for(var gi=0;gi<G.list.length;gi++){
+      var g=G.list[gi],mf=mk[g.key],row={target:M.target,machine:M.name,key:g.key,name:g.name,group:g.group,grel:g.rel,gDate:dstr(g.file.lastModified)};
+      if(!mf){row.status='Missing';row.findings=[{cat:'Missing on machine',g:g.name,m:'',d:'Program is in the golden stage but not on this machine'}];row.flags=['Missing on machine']}
+      else{
+        row.mname=mf.name;row.mrel=mf.rel;row.mDate=dstr(mf.file.lastModified);
+        var ga=await gl(g),ma=norm(await mf.file.text(),o);row.gLines=ga.length;row.mLines=ma.length;var gA=acache[g.key];row.role=gA.role;row.gName=gA.name;row.tG=gA.time;
+        var d=diffLines(ga,ma);
+        row.status=d.hunks.length?'Changed':'Same';row.hunks=d.hunks;row.nG=d.nG;row.nM=d.nM;row.tooBig=!!d.tooBig;
+        if(row.status==='Changed'){var mA=analyze(ma,c0),fl=findings(gA,mA,c0,row);row.tM=mA.time;row.mName=mA.name;fl.push({cat:'Changed lines',g:d.nG+' line(s)',m:d.nM+' line(s)',d:'Text differs in '+d.hunks.length+' place(s)'});
+          fl.sort(function(a,b){return SEV.indexOf(a.cat)-SEV.indexOf(b.cat)});row.fs=fsRows(gA,mA);row.findings=fl;row.flags=flagsOf(fl).filter(function(x){return x!=='Changed lines'})}
+        else{row.findings=[];row.flags=[];row.tM=gA.time;row.fs=fsRows(gA,gA)}
+        if(row.status==='Changed'){var dt=mf.file.lastModified-g.file.lastModified;row.age=Math.abs(dt)<60000?'same date':(dt<0?'older than golden':'newer than golden')}
+      }
+      rows.push(row);done++;if(done%20===0){$('bar').value=done;$('msg').textContent='Comparing '+M.target+' / '+M.name+' …';await tick()}
+    }
+    M.files.forEach(function(f){if(!G.map[f.key]&&!f.dupOf){rows.push({target:M.target,machine:M.name,key:f.key,name:f.name,group:'',status:'Extra',findings:[{cat:'Extra file',g:'',m:f.name,d:'File is on the machine but not in the golden stage'}],flags:['Extra file'],mname:f.name,mrel:f.rel,mDate:dstr(f.file.lastModified)})}});
+  }
+  var mains=[];G.list.forEach(function(g){var a=acache[g.key];if(a&&(a.role==='Main'||a.role==='Probing program'))mains.push({name:g.name,role:a.role,calls:a.calls,ops:a.ops.filter(function(o){return o.key!=='(start)'}).length,probe:a.probe.length,time:a.time})});
+  R={cfg:c0,mains:mains,rows:rows,machines:machines.map(function(m){return{target:m.target,name:m.name}}),golden:G.root,when:new Date(),opts:o};
+  $('bar').hidden=true;$('go').disabled=false;
+  var c=count(rows);$('msg').innerHTML='Done: '+rows.length+' comparisons. <b>'+c.Changed+'</b> changed, <b>'+c.Missing+'</b> missing, <b>'+c.Extra+'</b> extra.';
+  render();
+}
+function count(rows){var c={Same:0,Changed:0,Missing:0,Extra:0};rows.forEach(function(r){c[r.status]++});return c}
+$('go').onclick=function(){compare().catch(function(e){$('msg').innerHTML='<span class="err">Error: '+esc(e&&e.message||e)+'</span>';$('bar').hidden=true;$('go').disabled=false})};
+
+/* ---------- screen ---------- */
+function mlabel(m){return T.length>1?m.target+' / '+m.name:m.name}
+function render(){
+  $('res').hidden=false;
+  var ms=R.machines,sel=$('fm').value,gsel=$('fg').value;
+  $('fm').innerHTML='<option value="">All machines</option>'+ms.map(function(m,i){return'<option value="'+i+'">'+esc(mlabel(m))+'</option>'}).join('');$('fm').value=sel;
+  var gs={};G.list.forEach(function(g){if(g.group)gs[g.group]=1});
+  $('fg').innerHTML='<option value="">All groups</option>'+Object.keys(gs).map(function(g){return'<option>'+esc(g)+'</option>'}).join('');$('fg').value=gsel;
+  /* summary */
+  var h='<div class="tw" style="max-height:260px"><table><tr><th>Machine</th><th>Golden programs</th><th>Same</th><th>Changed</th><th>Missing</th><th>Extra</th><th>Match</th><th>Sequence</th><th>Feed / speed</th><th>Probing</th><th>Cycle time</th><th>Older than golden</th></tr>';
+  ms.forEach(function(m){var rs=R.rows.filter(function(r){return r.target===m.target&&r.machine===m.name}),c=count(rs),n=c.Same+c.Changed+c.Missing,old=rs.filter(function(r){return r.age==='older than golden'}).length;
+    h+='<tr><td><b>'+esc(mlabel(m))+'</b></td><td>'+n+'</td><td class="s-Same">'+c.Same+'</td><td class="s-Changed">'+c.Changed+'</td><td class="s-Missing">'+c.Missing+'</td><td class="s-Extra">'+c.Extra+'</td><td>'+(n?Math.round(c.Same/n*100):0)+'%</td>'+['Sequence','Feed / speed','Probing','Cycle time'].map(function(f){var k=rs.filter(function(r){return(r.flags||[]).indexOf(f)>=0}).length;return'<td class="'+(k?'s-Changed':'')+'">'+k+'</td>'}).join('')+'<td>'+old+'</td></tr>'});
+  h+='</table></div>';
+  if(R.mains&&R.mains.length){h+='<div class="small" style="margin-top:8px"><b>Main / probing programs found in the golden stage</b></div><div class="tw" style="max-height:200px"><table><tr><th>Program</th><th>Type</th><th>Calls (M98) in order</th><th>Operations</th><th>Probe steps</th><th>Est. cycle (min)</th></tr>';
+    R.mains.forEach(function(x){h+='<tr><td><b>'+esc(x.name)+'</b></td><td>'+x.role+'</td><td class="small">'+esc(x.calls.join(' > ')||'-')+'</td><td>'+x.ops+'</td><td>'+x.probe+'</td><td>'+(x.time/60).toFixed(2)+'</td></tr>'});h+='</table></div>'}
+  else h+='<div class="small" style="margin-top:8px">No main program with M98 calls was found in the golden stage (operation programs here end with M99 and call nothing), so the operation order and probing steps are checked instead.</div>';
+  $('sum').innerHTML=h;
+  view();
+}
+function filtered(){
+  var st={};document.querySelectorAll('.fs').forEach(function(c){if(c.checked)st[c.value]=1});
+  var m=$('fm').value,g=$('fg').value,q=$('fq').value.trim().toLowerCase(),ms=R.machines;
+  return R.rows.filter(function(r){return st[r.status]&&(m===''||(ms[+m].target===r.target&&ms[+m].name===r.machine))&&(g===''||r.group===g)&&(!$('ff').value||(r.flags||[]).indexOf($('ff').value)>=0)&&(!q||r.name.toLowerCase().indexOf(q)>=0)});
+}
+function view(){
+  var rows=filtered(),h='';
+  if(tab==='list'){
+    h='<table><tr><th>Machine</th><th>Program</th><th>Group</th><th>Status</th><th>Type</th><th>Flags</th><th>Lines changed (golden → machine)</th><th>Golden file date</th><th>Machine file date</th><th>Machine file</th><th></th></tr>';
+    rows.slice(0,3000).forEach(function(r,i){
+      var lc=r.status==='Changed'?(r.nG+' → '+r.nM+(r.tooBig?' (too many differences)':'')):'';
+      h+='<tr><td>'+esc(r.target+(T.length>1?' / ':' / ')+r.machine)+'</td><td><b>'+esc(r.name)+'</b></td><td>'+esc(r.group)+'</td><td class="s-'+r.status+'">'+(r.status==='Missing'?'Missing on machine':r.status==='Extra'?'Extra (not in golden)':r.status)+'</td><td>'+esc(r.role||'')+'</td><td class="small">'+esc((r.flags||[]).join(', '))+'</td><td>'+lc+'</td><td>'+(r.gDate||'')+'</td><td>'+(r.mDate||'')+(r.age?' <span class="small">('+r.age+')</span>':'')+'</td><td class="small">'+esc(r.mrel||'')+'</td><td>'+(r.status==='Changed'?'<button class="sm alt" data-d="'+R.rows.indexOf(r)+'">Show lines</button>':'')+'</td></tr>'});
+    h+='</table>'+(rows.length>3000?'<div class="small" style="padding:6px">Showing first 3000 of '+rows.length+'. Use the filters, or the Excel file for everything.</div>':'');
+    if(!rows.length)h='<div class="small" style="padding:10px">Nothing to show with these filters.</div>';
+  }else{
+    var ps=G.list.filter(function(g){var q=$('fq').value.trim().toLowerCase(),gg=$('fg').value;return(!gg||g.group===gg)&&(!q||g.name.toLowerCase().indexOf(q)>=0)}),mi=$('fm').value,ms=mi===''?R.machines:[R.machines[+mi]];
+    var idx={};R.rows.forEach(function(r){idx[r.target+'\u0001'+r.machine+'\u0001'+r.key]=r});
+    h='<table><tr><th>Program</th><th>Group</th>'+ms.map(function(m){return'<th>'+esc(mlabel(m))+'</th>'}).join('')+'</tr>';
+    ps.forEach(function(g){h+='<tr><td><b>'+esc(g.name)+'</b></td><td>'+esc(g.group)+'</td>';
+      ms.forEach(function(m){var r=idx[m.target+'\u0001'+m.name+'\u0001'+g.key];if(!r){h+='<td class="s-None">–</td>';return}
+        var txt=r.status==='Same'?'Same':r.status==='Changed'?'Changed ('+Math.max(r.nG,r.nM)+')':'MISSING';
+        h+='<td class="cell s-'+r.status+'"'+(r.status==='Changed'?' data-d="'+R.rows.indexOf(r)+'"':'')+'>'+txt+'</td>'});h+='</tr>'});
+    h+='</table>';
+  }
+  $('view').innerHTML=h;
+}
+function detail(i){
+  var r=R.rows[i],h='<div class="card" style="margin:0"><div class="row" style="justify-content:space-between"><h2 style="margin:0">'+esc(r.name)+' · '+esc(r.target+' / '+r.machine)+'</h2><button class="sm alt" id="dx" type="button">Close</button></div>'+(r.findings&&r.findings.length?'<div class="tw" style="max-height:240px;margin:6px 0"><table><tr><th>Finding</th><th>Golden</th><th>Machine</th><th>Detail</th></tr>'+r.findings.map(function(f){return'<tr><td><b>'+esc(f.cat)+'</b></td><td class="mono">'+esc(f.g)+'</td><td class="mono">'+esc(f.m)+'</td><td>'+esc(f.d)+'</td></tr>'}).join('')+'</table></div>':'')+'<div class="small">Red = golden line, green = machine line. Line numbers are the original file line numbers.</div><div class="tw" style="max-height:420px;margin-top:6px"><table>';
+  var n=0;
+  r.hunks.forEach(function(hk,j){
+    h+='<tr><th colspan="3">Change '+(j+1)+' of '+r.hunks.length+'</th></tr>';
+    hk.g.forEach(function(l){if(n++<1500)h+='<tr class="dg"><td>Golden</td><td>'+l.n+'</td><td class="mono">'+esc(l.o)+'</td></tr>'});
+    hk.m.forEach(function(l){if(n++<1500)h+='<tr class="dm"><td>Machine</td><td>'+l.n+'</td><td class="mono">'+esc(l.o)+'</td></tr>'});
+  });
+  if(n>1500)h+='<tr><td colspan="3" class="small">… more lines are in the Excel file.</td></tr>';
+  h+='</table></div></div>';$('detail').innerHTML=h;$('detail').scrollIntoView({behavior:'smooth',block:'nearest'});
+}
+document.addEventListener('click',function(e){
+  var t=e.target.closest('.tab');if(t){tab=t.dataset.t;document.querySelectorAll('.tab').forEach(function(x){x.classList.toggle('on',x===t)});if(R)view();return}
+  var d=e.target.closest('[data-d]');if(d){detail(+d.dataset.d);return}
+  if(e.target.id==='dx')$('detail').innerHTML='';
+});
+['fm','fg','ff'].forEach(function(i){$(i).onchange=function(){if(R)view()}});$('fq').oninput=function(){if(R)view()};
+document.querySelectorAll('.fs').forEach(function(c){c.onchange=function(){if(R)view()}});
+
+/* ---------- ZIP / XLSX writer (no libraries) ---------- */
+var CRC=(function(){var t=new Uint32Array(256);for(var n=0;n<256;n++){var c=n;for(var k=0;k<8;k++)c=c&1?0xEDB88320^(c>>>1):c>>>1;t[n]=c>>>0}return t})();
+function crc32(u){var c=0xFFFFFFFF;for(var i=0;i<u.length;i++)c=CRC[(c^u[i])&255]^(c>>>8);return(c^0xFFFFFFFF)>>>0}
+function zip(files){
+  var enc=new TextEncoder(),parts=[],cen=[],off=0;
+  files.forEach(function(f){
+    var nm=enc.encode(f.name),data=typeof f.data==='string'?enc.encode(f.data):f.data,crc=crc32(data);
+    var lh=new DataView(new ArrayBuffer(30));lh.setUint32(0,0x04034b50,true);lh.setUint16(4,20,true);lh.setUint16(6,0x0800,true);lh.setUint16(8,0,true);lh.setUint16(10,0,true);lh.setUint16(12,0x21,true);lh.setUint32(14,crc,true);lh.setUint32(18,data.length,true);lh.setUint32(22,data.length,true);lh.setUint16(26,nm.length,true);lh.setUint16(28,0,true);
+    parts.push(new Uint8Array(lh.buffer),nm,data);
+    var ch=new DataView(new ArrayBuffer(46));ch.setUint32(0,0x02014b50,true);ch.setUint16(4,20,true);ch.setUint16(6,20,true);ch.setUint16(8,0x0800,true);ch.setUint16(12,0,true);ch.setUint16(14,0x21,true);ch.setUint32(16,crc,true);ch.setUint32(20,data.length,true);ch.setUint32(24,data.length,true);ch.setUint16(28,nm.length,true);ch.setUint32(42,off,true);
+    cen.push(new Uint8Array(ch.buffer),nm);off+=30+nm.length+data.length;
+  });
+  var cs=0;cen.forEach(function(c){cs+=c.length});
+  var end=new DataView(new ArrayBuffer(22));end.setUint32(0,0x06054b50,true);end.setUint16(8,files.length,true);end.setUint16(10,files.length,true);end.setUint32(12,cs,true);end.setUint32(16,off,true);
+  return new Blob(parts.concat(cen,[new Uint8Array(end.buffer)]),{type:'application/octet-stream'});
+}
+function xe(s){return String(s===undefined||s===null?'':s).replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g,'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').slice(0,32000)}
+function colL(i){var s='';i++;while(i>0){var m=(i-1)%26;s=String.fromCharCode(65+m)+s;i=Math.floor((i-1)/26)}return s}
+/* styles: 0 normal,1 header,2 Same,3 Changed,4 Missing,5 Extra,6 wrap,7 bold,8 title */
+var SMAP={Same:2,Changed:3,Missing:4,Extra:5};
+function sheet(rows,widths,opt){
+  opt=opt||{};var x='<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews><sheetView workbookViewId="0">'+(opt.freeze?'<pane ySplit="'+opt.freeze+'" topLeftCell="A'+(opt.freeze+1)+'" activePane="bottomLeft" state="frozen"/>':'')+'</sheetView></sheetViews><cols>';
+  widths.forEach(function(w,i){x+='<col min="'+(i+1)+'" max="'+(i+1)+'" width="'+w+'" customWidth="1"/>'});
+  x+='</cols><sheetData>';
+  rows.forEach(function(r,ri){x+='<row r="'+(ri+1)+'">';
+    r.forEach(function(c,ci){if(c===null||c===undefined||c==='')return;var v=c,s=0;if(typeof c==='object'){v=c.v;s=c.s||0}
+      var ref=colL(ci)+(ri+1);
+      if(typeof v==='number')x+='<c r="'+ref+'" s="'+s+'"><v>'+v+'</v></c>';else x+='<c r="'+ref+'" s="'+s+'" t="inlineStr"><is><t xml:space="preserve">'+xe(v)+'</t></is></c>'});
+    x+='</row>'});
+  x+='</sheetData>'+(opt.filter&&rows.length>1?'<autoFilter ref="A'+opt.filter+':'+colL(widths.length-1)+rows.length+'"/>':'')+'</worksheet>';return x;
+}
+function H(a){return a.map(function(t){return{v:t,s:1}})}
+function buildXlsx(){
+  var rows=R.rows,ms=R.machines,sheets=[],o=R.opts;
+  /* Summary */
+  var s=[[{v:'CNC program comparison – golden vs machines',s:8}],['Golden folder',R.golden],['Created',R.when.toLocaleString()],['Ignored: '+[o.blank?'blank lines':'',o.trim?'edge spaces':'',o.allsp?'all spaces':'',o.cs?'case':'',o.n?'line numbers':'',o.com?'comments':'',o.pct?'% lines':''].filter(Boolean).join(', ')],[],
+    H(['Stage folder','Machine','Golden programs','Same','Changed','Missing on machine','Extra (not in golden)','Match %','Changed and older than golden'])];
+  ms.forEach(function(m){var rs=rows.filter(function(r){return r.target===m.target&&r.machine===m.name}),c=count(rs),n=c.Same+c.Changed+c.Missing;
+    s.push([m.target,m.name,n,{v:c.Same,s:2},{v:c.Changed,s:3},{v:c.Missing,s:4},{v:c.Extra,s:5},n?Math.round(c.Same/n*100):0,rs.filter(function(r){return r.age==='older than golden'}).length])});
+  sheets.push(['Summary',sheet(s,[18,24,16,10,10,18,18,10,26],{})]);
+  /* Change list */
+  var cl=[H(['Stage folder','Machine','Program','Group','Status','Golden lines changed','Machine lines changed','Changes (blocks)','Golden file date','Machine file date','Machine file vs golden','Golden file','Machine file','Type','Flags'])];
+  rows.filter(function(r){return r.status!=='Same'}).forEach(function(r){cl.push([r.target,r.machine,r.name,r.group,{v:r.status==='Missing'?'Missing on machine':r.status==='Extra'?'Extra (not in golden)':'Changed',s:SMAP[r.status]},r.status==='Changed'?r.nG:'',r.status==='Changed'?r.nM:'',r.status==='Changed'?r.hunks.length:'',r.gDate||'',r.mDate||'',r.age||'',r.grel||'',r.mrel||'',r.role||'',(r.flags||[]).join(', ')])});
+  sheets.push(['Change list',sheet(cl,[16,22,18,12,22,12,12,12,17,17,18,30,30,16,26],{freeze:1,filter:1})]);
+  /* Findings (ordered by importance) */
+  var fd=[H(['Order','Machine','Program','Type','Finding','Golden','Machine','Detail'])],fo=[];
+  rows.forEach(function(r){(r.findings||[]).forEach(function(f){fo.push([SEV.indexOf(f.cat),r,f])})});
+  fo.sort(function(a,b){return a[0]-b[0]||(a[1].machine<b[1].machine?-1:a[1].machine>b[1].machine?1:0)||(a[1].name<b[1].name?-1:1)});
+  fo.forEach(function(x,i){fd.push([i+1,x[1].machine,x[1].name,x[1].role||'',{v:x[2].cat,s:x[0]<=1?4:x[0]<=5?3:5},x[2].g,x[2].m,x[2].d])});
+  sheets.push(['Findings',sheet(fd,[7,22,16,16,22,38,38,60],{freeze:1,filter:1})]);
+  /* Feed & Speed tab */
+  var fsx=[H(['Machine','Program','Operation','Golden tool','Machine tool','Golden speed S','Machine speed S','Golden feed F','Machine feed F','Result'])],fsn=0,fcut=false;
+  rows.forEach(function(r){(r.fs||[]).forEach(function(x){if(fsx.length>250000){fcut=true;return}
+    fsx.push([r.machine,r.name,x[0],x[1],x[7],x[2],x[3],x[4],x[5],{v:x[6],s:x[6]==='Same'?2:x[6].indexOf('missing')>=0?4:3}])})});
+  if(fcut)fsx.push(['Stopped at 250000 rows.']);
+  sheets.push(['Feed and Speed',sheet(fsx,[20,16,38,24,24,14,14,14,14,28],{freeze:1,filter:1})]);
+  /* Main programs + cycle time */
+  var ct=[[{v:'Estimated cycle time (from tool paths, minutes) - for comparison with golden only',s:8}],[],H(['Program','Type','Calls in order','Operations','Probe steps','Golden min'].concat(ms.map(mlabel)))];
+  var cidx={};rows.forEach(function(r){cidx[r.target+'\u0001'+r.machine+'\u0001'+r.key]=r});
+  G.list.forEach(function(g){var gr=null;ms.forEach(function(m){var r=cidx[m.target+'\u0001'+m.name+'\u0001'+g.key];if(r&&r.tG)gr=r});
+    var mn=(R.mains||[]).filter(function(x){return x.name===g.name})[0];if(!gr||!gr.tG)return;
+    var line=[{v:g.name,s:7},gr.role||'',mn?mn.calls.join(' > '):'',mn?mn.ops:'',mn?mn.probe:'',+(gr.tG/60).toFixed(2)];
+    ms.forEach(function(m){var r=cidx[m.target+'\u0001'+m.name+'\u0001'+g.key];if(!r||!r.tM)line.push('');else{var pc=(r.tM-r.tG)/r.tG*100;line.push({v:(r.tM/60).toFixed(2)+' ('+(pc>0?'+':'')+pc.toFixed(1)+'%)',s:Math.abs(pc)>=R.cfg.tol?3:0})}});ct.push(line)});
+  sheets.push(['Cycle time',sheet(ct,[18,16,30,11,11,11].concat(ms.map(function(){return 18})),{freeze:3})]);
+  /* Matrix */
+  var mx=[H(['Program','Group'].concat(ms.map(mlabel)))],idx={};rows.forEach(function(r){idx[r.target+'\u0001'+r.machine+'\u0001'+r.key]=r});
+  G.list.forEach(function(g){var line=[{v:g.name,s:7},g.group];ms.forEach(function(m){var r=idx[m.target+'\u0001'+m.name+'\u0001'+g.key];
+    if(!r)line.push('');else line.push({v:r.status==='Same'?'Same':r.status==='Changed'?'Changed ('+Math.max(r.nG,r.nM)+')':'MISSING',s:SMAP[r.status]})});mx.push(line)});
+  sheets.push(['Matrix',sheet(mx,[20,12].concat(ms.map(function(){return 18})),{freeze:1,filter:1})]);
+  /* Line changes */
+  var lc=[H(['Stage folder','Machine','Program','Change','Golden line no.','Golden line','Machine line no.','Machine line'])],cap=250000,cut=false;
+  rows.forEach(function(r){if(r.status!=='Changed'||cut)return;
+    r.hunks.forEach(function(hk){var n=Math.max(hk.g.length,hk.m.length);
+      for(var i=0;i<n&&!cut;i++){var gl=hk.g[i],ml=hk.m[i],t=gl&&ml?'Changed':gl?'Line only in golden':'Line only on machine';
+        lc.push([r.target,r.machine,r.name,{v:t,s:gl&&ml?3:gl?4:5},gl?gl.n:'',gl?gl.o:'',ml?ml.n:'',ml?ml.o:'']);if(lc.length>cap){cut=true}}})});
+  if(cut)lc.push(['Stopped at '+cap+' rows. Compare fewer machines at once for the rest.']);
+  sheets.push(['Line changes',sheet(lc,[16,22,18,22,12,60,12,60],{freeze:1,filter:1})]);
+  var styles='<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="4"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><color rgb="FFFFFFFF"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="14"/><name val="Calibri"/></font></fonts>'+
+   '<fills count="7"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF0F6E7A"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFE3F4E8"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFFDF0D6"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFFDE6E4"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFE3ECFB"/></patternFill></fill></fills>'+
+   '<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'+
+   '<cellXfs count="9"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1" applyAlignment="1"><alignment wrapText="1" vertical="center"/></xf>'+
+   '<xf numFmtId="0" fontId="0" fillId="3" borderId="0" xfId="0" applyFill="1"/><xf numFmtId="0" fontId="0" fillId="4" borderId="0" xfId="0" applyFill="1"/><xf numFmtId="0" fontId="0" fillId="5" borderId="0" xfId="0" applyFill="1"/><xf numFmtId="0" fontId="0" fillId="6" borderId="0" xfId="0" applyFill="1"/>'+
+   '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0" applyAlignment="1"><alignment wrapText="1" vertical="top"/></xf><xf numFmtId="0" fontId="2" fillId="0" borderId="0" xfId="0" applyFont="1"/><xf numFmtId="0" fontId="3" fillId="0" borderId="0" xfId="0" applyFont="1"/></cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>';
+  var files=[{name:'[Content_Types].xml',data:'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>'+sheets.map(function(_,i){return'<Override PartName="/xl/worksheets/sheet'+(i+1)+'.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'}).join('')+'</Types>'},
+   {name:'_rels/.rels',data:'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>'},
+   {name:'xl/workbook.xml',data:'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>'+sheets.map(function(s,i){return'<sheet name="'+s[0]+'" sheetId="'+(i+1)+'" r:id="rId'+(i+1)+'"/>'}).join('')+'</sheets></workbook>'},
+   {name:'xl/_rels/workbook.xml.rels',data:'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'+sheets.map(function(_,i){return'<Relationship Id="rId'+(i+1)+'" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet'+(i+1)+'.xml"/>'}).join('')+'<Relationship Id="rId'+(sheets.length+1)+'" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>'},
+   {name:'xl/styles.xml',data:styles}];
+  sheets.forEach(function(s,i){files.push({name:'xl/worksheets/sheet'+(i+1)+'.xml',data:s[1]})});
+  return zip(files);
+}
+
+/* ---------- PDF writer (no libraries) ---------- */
+function buildPdf(){
+  var PW=842,PH=595,MX=30,pages=[],cur,y;
+  function lat(s){return String(s===undefined||s===null?'':s).replace(/\t/g,'    ').replace(/[^\x20-\x7E]/g,function(c){var n=c.charCodeAt(0);return(n>=160&&n<=255)?c:'?'})}
+  function esc2(s){return lat(s).replace(/\\/g,'\\\\').replace(/\(/g,'\\(').replace(/\)/g,'\\)')}
+  function np(){cur=[];pages.push(cur);y=PH-34}
+  function txt(x,yy,s,f,sz,col){cur.push((col||'0 g')+' BT /'+f+' '+sz+' Tf '+x.toFixed(1)+' '+yy.toFixed(1)+' Td ('+esc2(s)+') Tj ET')}
+  function rect(x,yy,w,h,rgb){cur.push(rgb+' rg '+x.toFixed(1)+' '+yy.toFixed(1)+' '+w.toFixed(1)+' '+h.toFixed(1)+' re f 0 g')}
+  function need(h){if(y-h<34)np()}
+  function cut(s,n){s=lat(s);return s.length>n?s.slice(0,n-1)+'~':s}
+  var COL={Same:'0.89 0.96 0.91',Changed:'0.99 0.94 0.84',Missing:'0.99 0.90 0.89',Extra:'0.89 0.93 0.98'};
+  np();
+  txt(MX,y,'CNC program comparison - golden vs machines','F2',16);y-=18;
+  txt(MX,y,'Golden folder: '+R.golden+'    Created: '+R.when.toLocaleString(),'F1',9);y-=12;
+  var ig=[R.opts.blank?'blank lines':'',R.opts.trim?'edge spaces':'',R.opts.allsp?'all spaces':'',R.opts.cs?'case':'',R.opts.n?'line numbers':'',R.opts.com?'comments':'',R.opts.pct?'% lines':''].filter(Boolean).join(', ');
+  txt(MX,y,'Ignored when comparing: '+(ig||'nothing'),'F1',9);y-=18;
+  /* summary table */
+  var cx=[MX,230,320,370,430,500,570,640];
+  function hdr(cols,xs){rect(MX,y-3,PW-2*MX,14,'0.06 0.43 0.48');cols.forEach(function(c,i){txt(xs[i]+3,y+1,c,'F2',8.5,'1 g')});y-=15}
+  txt(MX,y,'Summary per machine','F2',11);y-=14;
+  hdr(['Machine','Golden progs','Same','Changed','Missing','Extra','Match','Older than golden'],cx);
+  R.machines.forEach(function(m){need(14);var rs=R.rows.filter(function(r){return r.target===m.target&&r.machine===m.name}),c=count(rs),n=c.Same+c.Changed+c.Missing;
+    txt(cx[0]+3,y,cut(mlabel(m),42),'F1',9);txt(cx[1]+3,y,String(n),'F1',9);txt(cx[2]+3,y,String(c.Same),'F1',9);txt(cx[3]+3,y,String(c.Changed),'F2',9);txt(cx[4]+3,y,String(c.Missing),'F2',9);txt(cx[5]+3,y,String(c.Extra),'F1',9);txt(cx[6]+3,y,(n?Math.round(c.Same/n*100):0)+'%','F1',9);
+    txt(cx[7]+3,y,String(rs.filter(function(r){return r.age==='older than golden'}).length),'F1',9);y-=13});
+  y-=8;
+  /* per machine change list */
+  R.machines.forEach(function(m){
+    var rs=R.rows.filter(function(r){return r.target===m.target&&r.machine===m.name&&r.status!=='Same'});
+    need(80);
+    txt(MX,y,'Machine: '+mlabel(m),'F2',12);y-=16;
+    if(!rs.length){txt(MX,y,'All golden programs match. Nothing to update.','F1',9);y-=16;return}
+    rs.forEach(function(r){
+      need(26);
+      var label=r.status==='Missing'?'MISSING on machine':r.status==='Extra'?'EXTRA (not in golden)':'CHANGED';
+      rect(MX,y-3,PW-2*MX,13,COL[r.status]);
+      txt(MX+3,y,cut(r.name,26)+(r.group?'  ['+cut(r.group,12)+']':''),'F2',9);
+      txt(250,y,label,'F2',9);
+      if(r.status==='Changed')txt(380,y,'golden lines '+r.nG+' -> machine lines '+r.nM+'   ('+r.hunks.length+' block'+(r.hunks.length>1?'s':'')+')'+(r.tooBig?'  too many differences':''),'F1',9);
+      txt(620,y,cut((r.mDate?'machine '+r.mDate:'golden '+(r.gDate||''))+(r.age&&r.age!=='same date'?' ('+r.age+')':''),48),'F1',8);
+      y-=15;
+      (r.findings||[]).filter(function(f){return f.cat!=='Changed lines'&&f.cat!=='Missing on machine'&&f.cat!=='Extra file'}).slice(0,12).forEach(function(f){need(11);txt(MX+10,y,cut(f.cat+': '+(f.g||f.m?'golden '+f.g+'  ->  machine '+f.m+'  ':'')+f.d,170),'F1',8,'0.15 0.2 0.3 rg');y-=10});
+      if(r.status==='Changed'){var shown=0,CAP=14,more=0;
+        r.hunks.forEach(function(hk){var n=Math.max(hk.g.length,hk.m.length);for(var i=0;i<n;i++){
+          if(shown>=CAP){more++;continue}shown++;need(22);var gl=hk.g[i],ml=hk.m[i];
+          if(gl){txt(MX+10,y,'G '+('    '+gl.n).slice(-5)+': '+cut(gl.o,150),'F3',7.5,'0.7 0.15 0.1 rg');y-=9.5}
+          if(ml){txt(MX+10,y,'M '+('    '+ml.n).slice(-5)+': '+cut(ml.o,150),'F3',7.5,'0.1 0.45 0.2 rg');y-=9.5}
+          y-=2}});
+        if(more){need(12);txt(MX+10,y,'... '+more+' more changed lines are in the Excel file.','F1',8,'0.4 g');y-=11}
+        y-=3}
+    });
+    y-=6;
+  });
+  /* assemble */
+  var objs=[],add=function(s){objs.push(s);return objs.length};
+  add('<< /Type /Catalog /Pages 2 0 R >>');add('PLACEHOLDER');
+  var f1=add('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>'),f2=add('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>'),f3=add('<< /Type /Font /Subtype /Type1 /BaseFont /Courier /Encoding /WinAnsiEncoding >>');
+  var kids=[],tot=pages.length;
+  pages.forEach(function(p,i){
+    p.push('0.4 g BT /F1 8 Tf '+(PW-100)+' 18 Td (Page '+(i+1)+' of '+tot+') Tj ET 0 g');
+    var body=p.join('\n'),c=add('<< /Length '+body.length+' >>\nstream\n'+body+'\nendstream');
+    var pg=add('<< /Type /Page /Parent 2 0 R /MediaBox [0 0 '+PW+' '+PH+'] /Resources << /Font << /F1 '+f1+' 0 R /F2 '+f2+' 0 R /F3 '+f3+' 0 R >> >> /Contents '+c+' 0 R >>');kids.push(pg+' 0 R')});
+  objs[1]='<< /Type /Pages /Kids ['+kids.join(' ')+'] /Count '+kids.length+' >>';
+  var out='%PDF-1.4\n',offs=[];
+  objs.forEach(function(o,i){offs.push(out.length);out+=(i+1)+' 0 obj\n'+o+'\nendobj\n'});
+  var xr=out.length;out+='xref\n0 '+(objs.length+1)+'\n0000000000 65535 f \n';
+  offs.forEach(function(o){out+=('0000000000'+o).slice(-10)+' 00000 n \n'});
+  out+='trailer\n<< /Size '+(objs.length+1)+' /Root 1 0 R >>\nstartxref\n'+xr+'\n%%EOF';
+  var u=new Uint8Array(out.length);for(var i=0;i<out.length;i++)u[i]=out.charCodeAt(i)&255;
+  return new Blob([u],{type:'application/pdf'});
+}
+function save(blob,name){var a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;document.body.appendChild(a);a.click();setTimeout(function(){URL.revokeObjectURL(a.href);a.remove()},2000)}
+function stamp(){var d=new Date(),p=function(n){return(n<10?'0':'')+n};return d.getFullYear()+p(d.getMonth()+1)+p(d.getDate())+'_'+p(d.getHours())+p(d.getMinutes())}
+$('dlX').onclick=function(){if(R)save(buildXlsx(),'Program_Comparison_'+stamp()+'.xlsx')};
+$('dlP').onclick=function(){if(R)save(buildPdf(),'Program_Comparison_'+stamp()+'.pdf')};
+window.__pc={getR:function(){return R},xlsx:buildXlsx,pdf:buildPdf,diff:diffLines,norm:norm};
+})();
+</script>
+</body>
+</html>
